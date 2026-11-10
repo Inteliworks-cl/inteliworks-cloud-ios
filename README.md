@@ -19,7 +19,7 @@ Este repo **no copia** el código de Nextcloud. `.github/workflows/build.yml`:
 
 | Archivo | Qué es |
 |---|---|
-| `UPSTREAM_TAG` | tag estable de Nextcloud iOS (ej. `35.2.2`) |
+| `UPSTREAM_TAG` | tag estable de Nextcloud iOS (ej. `35.0.0`; >= 35.1 requiere Xcode 27 en el runner) |
 | `branding/apply.sh` | aplica la marca sobre el checkout upstream |
 | `branding/AppIcon.icon`, `branding/Custom.xcassets` | ícono (Icon Composer + 1024 px) y logo |
 | `tools/GenerarAssetsTiendas.java` | regenera íconos/capturas de tienda desde el logo fuente |

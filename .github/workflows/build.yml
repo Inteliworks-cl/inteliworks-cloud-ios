@@ -51,13 +51,11 @@ jobs:
       - name: Aplicar personalizacion
         run: branding/apply.sh upstream
 
-      # nextcloud/ios 35.2.x usa APIs del SDK iOS 27 (upstream compila con Xcode 27.1)
-      - name: Xcode 27
+      # Xcode: el mayor instalado en el runner. nextcloud/ios >= 35.1 exige Xcode 27 (SDK iOS 27);
+      # mientras GitHub no lo tenga en macos-26, UPSTREAM_TAG queda en 35.0.0 (compila con Xcode 26).
+      - name: Xcode
         run: |
-          ls -d /Applications/Xcode*.app
-          X=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1)
-          [ -n "$X" ] || X=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
-          [ -n "$X" ] || { echo "ERROR: el runner no tiene Xcode 27 (upstream lo exige)"; exit 1; }
+          X=$(ls -d /Applications/Xcode_*.app | grep -v -i beta | sort -V | tail -1)
           echo "Usando $X"; sudo xcode-select -s "$X/Contents/Developer"; xcodebuild -version
 
       - name: Resolver paquetes Swift
