@@ -1,0 +1,127 @@
+# Compila Inteliworks Cloud (iOS) = nextcloud/ios (tag UPSTREAM_TAG) + branding/
+#  - Siempre: compila SIN firma (valida que el rebrand compila).
+#  - Solo con workflow_dispatch "subir=true" Y los secrets de App Store Connect cargados:
+#    archiva, firma (firma automatica en la nube de Apple via API key) y sube a App Store Connect/TestFlight.
+name: Build iOS
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      subir:
+        description: "Firmar y subir a App Store Connect (TestFlight)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    runs-on: macos-26
+    timeout-minutes: 120
+    env:
+      HAS_ASC: ${{ secrets.ASC_KEY_P8_BASE64 != '' && secrets.ASC_KEY_ID != '' && secrets.ASC_ISSUER_ID != '' && secrets.APPLE_TEAM_ID != '' }}
+      PROJECT: Nextcloud.xcodeproj
+      SCHEME: Nextcloud
+    steps:
+      - name: Checkout (branding)
+        uses: actions/checkout@v5
+
+      - name: Leer version upstream
+        id: v
+        run: |
+          echo "tag=$(tr -d '[:space:]' < UPSTREAM_TAG)" >> "$GITHUB_OUTPUT"
+          echo "build=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout Nextcloud iOS ${{ steps.v.outputs.tag }}
+        uses: actions/checkout@v5
+        with:
+          repository: nextcloud/ios
+          ref: ${{ steps.v.outputs.tag }}
+          path: upstream
+          persist-credentials: false
+
+      - name: Aplicar personalizacion
+        run: branding/apply.sh upstream
+
+      - name: Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Resolver paquetes Swift
+        working-directory: upstream
+        run: xcodebuild -resolvePackageDependencies -project "$PROJECT" -scheme "$SCHEME"
+
+      - name: Compilar SIN firma (validacion)
+        working-directory: upstream
+        run: |
+          set -o pipefail
+          xcodebuild build -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
+            -destination 'generic/platform=iOS' \
+            MARKETING_VERSION="${{ steps.v.outputs.tag }}" CURRENT_PROJECT_VERSION="${{ steps.v.outputs.build }}" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | tee "$RUNNER_TEMP/build.log" | grep -E "error:|warning: .*Inteliworks|BUILD (SUCCEEDED|FAILED)" || true
+          grep -q "BUILD SUCCEEDED" "$RUNNER_TEMP/build.log"
+
+      - name: Verificar marca en el .app
+        working-directory: upstream
+        run: |
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -path '*Release-iphoneos/*.app' -maxdepth 6 -type d | head -n1)
+          echo "$APP"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' -c 'Print :CFBundleDisplayName' -c 'Print :CFBundleShortVersionString' "$APP/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")" = "cl.inteliworks.cloud"
+
+      - name: Log de compilacion
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: build-log
+          path: ${{ runner.temp }}/build.log
+          retention-days: 7
+
+      # ---------- Firma + subida (solo con secrets y a pedido) ----------
+      # Secrets del repo (los carga Bob desde el panel de credenciales; nunca en el codigo):
+      #   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8_BASE64 (llave .p8 en base64, rol Admin o App Manager),
+      #   APPLE_TEAM_ID (Team ID de 10 caracteres).
+      - name: Archivar, firmar y subir a App Store Connect
+        if: env.HAS_ASC == 'true' && github.event_name == 'workflow_dispatch' && inputs.subir
+        working-directory: upstream
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          KEY="$RUNNER_TEMP/AuthKey_$ASC_KEY_ID.p8"
+          echo "$ASC_KEY_P8_BASE64" | base64 -d > "$KEY"
+          AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$KEY" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+          xcodebuild archive -project "$PROJECT" -scheme "$SCHEME" -configuration Release \
+            -destination 'generic/platform=iOS' -archivePath "$RUNNER_TEMP/IW.xcarchive" \
+            DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic \
+            MARKETING_VERSION="${{ steps.v.outputs.tag }}" CURRENT_PROJECT_VERSION="${{ steps.v.outputs.build }}" \
+            "${AUTH[@]}"
+          cat > "$RUNNER_TEMP/ExportOptions.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/IW.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" -exportPath "$RUNNER_TEMP/export" "${AUTH[@]}"
+          rm -f "$KEY"
+          echo "Subido build ${{ steps.v.outputs.build }} (version ${{ steps.v.outputs.tag }}) a App Store Connect"
