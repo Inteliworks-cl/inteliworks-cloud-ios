@@ -51,9 +51,29 @@ set_opt appStoreUrl '"https://inteliworks.cl/cloud/"'
 set_opt capabilitiesGroup "\"$GROUP\""
 set_opt capabilitiesGroupApps "\"$GROUP_APPS\""
 set_opt disable_show_more_nextcloud_apps_in_settings 'true'
+# Sin Crashlytics/Firebase: no se inicializa (no envia datos a terceros; App Privacy = sin diagnosticos)
+set_opt disable_crash_service 'true'
 # Color de marca #1E90D6 (30,144,214)
 perl -pi -e 's#(let customer: UIColor = UIColor\()red: [0-9.]+ / 255\.0, green: [0-9.]+ / 255\.0, blue: [0-9.]+ / 255\.0#${1}red: 30.0 / 255.0, green: 144.0 / 255.0, blue: 214.0 / 255.0#' "$S"
 grep -q "red: 30.0 / 255.0, green: 144.0 / 255.0, blue: 214.0" "$S" || die "no se cambio el color de marca"
+
+# 5) GoogleService-Info.plist: el proyecto lo referencia (Firebase va enlazado), pero con
+#    disable_crash_service=true nunca se llama FirebaseApp.configure(). Placeholder sin credenciales.
+cat > "$UP/GoogleService-Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>BUNDLE_ID</key><string>$APP_ID</string>
+	<key>PROJECT_ID</key><string>inteliworks-cloud-sin-firebase</string>
+	<key>GOOGLE_APP_ID</key><string>1:000000000000:ios:0000000000000000</string>
+	<key>GCM_SENDER_ID</key><string>000000000000</string>
+	<key>API_KEY</key><string>sin-uso</string>
+	<key>IS_ANALYTICS_ENABLED</key><false/>
+	<key>IS_GCM_ENABLED</key><false/>
+</dict>
+</plist>
+PLIST
 
 # 5) Iconos y logo
 rm -rf "$UP/AppIcon.icon"; cp -r "$HERE/AppIcon.icon" "$UP/AppIcon.icon"
