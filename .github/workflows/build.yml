@@ -51,10 +51,14 @@ jobs:
       - name: Aplicar personalizacion
         run: branding/apply.sh upstream
 
-      - name: Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
+      # nextcloud/ios 35.2.x usa APIs del SDK iOS 27 (upstream compila con Xcode 27.1)
+      - name: Xcode 27
+        run: |
+          ls -d /Applications/Xcode*.app
+          X=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | grep -v -i beta | sort -V | tail -1)
+          [ -n "$X" ] || X=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$X" ] || { echo "ERROR: el runner no tiene Xcode 27 (upstream lo exige)"; exit 1; }
+          echo "Usando $X"; sudo xcode-select -s "$X/Contents/Developer"; xcodebuild -version
 
       - name: Resolver paquetes Swift
         working-directory: upstream
